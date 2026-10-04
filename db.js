@@ -1,8 +1,8 @@
 import { SEED_INGREDIENTS, SEED_RECIPES, SEED_VERSION } from './seed.js';
 
 // Вставь ключи из Supabase (Project Settings → API Keys). Пока пусто — всё хранится только в этом браузере.
-const SUPABASE_URL = '';
-const SUPABASE_KEY = '';
+const SUPABASE_URL = 'https://pvmbgdelooxvbrwhzlzt.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_knFntmZ21i-tykan4-Vr_Q_9bYwmoCa';
 
 const sb = SUPABASE_URL ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 export const mode = sb ? 'supabase' : 'local';

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Домашнее меню</title>
+  <script>
+    // Применяем сохранённую тему до отрисовки страницы, чтобы не было мигания
+    try { document.documentElement.setAttribute('data-theme', localStorage.getItem('menu_theme') || 'light'); } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>Домашнее меню</h1>
+    <div class="chrome">
+      <div class="hdr-right" id="hdr-right" hidden><span id="who"></span><button id="btn-add" class="btn primary">+ Рецепт</button></div>
+      <button id="lang-toggle" class="btn lang-toggle" title="English / Русский">EN</button>
+      <button id="theme-toggle" class="icon-toggle" title="Тёмная тема" aria-label="Тёмная тема"></button>
+    </div>
+  </header>
+
+  <nav id="nav" class="nav"></nav>
+  <main id="view"></main>
+
+  <dialog id="dlg"></dialog>
+  <datalist id="ing-list"></datalist>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -16,7 +16,7 @@ const CATS = ['Мясо и птица', 'Рыба и морепродукты', 
   'Орехи и сухофрукты', 'Специи и соусы', 'Консервы', 'Сладости', 'Напитки', 'Бакалея', 'Другое'];
 const CATS_EN = ['Meat & poultry', 'Fish & seafood', 'Vegetables', 'Herbs', 'Fruits', 'Dairy & eggs', 'Grains & pasta', 'Legumes', 'Bread & baked goods',
   'Nuts & dried fruits', 'Spices & sauces', 'Canned goods', 'Sweets', 'Drinks', 'Pantry', 'Other'];
-const PAGES = [['recipes', 'Блюда', 'Dishes'], ['my', 'Моё меню', 'My menu'], ['week', 'Меню недели', 'Weekly menu'], ['shop', 'Покупки', 'Shopping']];
+const PAGES = [['recipes', 'Блюда', 'Dishes'], ['my', 'Рацион', 'My menu'], ['week', 'Меню недели', 'Weekly menu'], ['shop', 'Покупки', 'Shopping']];
 const CUR = { AMD: ['֏', 0, 'Драм', 'Dram'], RUB: ['₽', 0, 'Рубль', 'Ruble'], USD: ['$', 2, 'Доллар', 'Dollar'], GEL: ['₾', 2, 'Лари', 'Lari'] };
 const DISCOUNTS = [0, 10, 20, 50, 100];
 // Слот = '0b' (день 0-6 + b/c/l/d), 's0'..'s2' (салаты), 'x0'..'x2' (десерты)
@@ -38,7 +38,6 @@ const S = {
   meal: 'Завтрак', q: '', tags: new Set(), pick: new Set(), openCats: new Set(), showPick: false,
   name: '', my: [], done: new Set(), priceOv: {}, formPhoto: '', // priceOv: временные правки цен в смете
 };
-const S_SETTINGS_DEFAULT = { currency: 'AMD', supplies: 200, cook_k1: 0.7, cook_k2: 1, cook_k3: 1.5 };
 
 // L(ru, en) — короткая обёртка для перевода статичного текста под текущий язык
 const L = (ru, en) => (S.lang === 'en' ? en : ru);
@@ -210,6 +209,10 @@ async function enterRoom() {
   S.page = 'recipes';
   fillDatalist();
   render();
+  // Туториал показываем через раз: на 1-й, 3-й, 5-й... вход в любую комнату на этом устройстве
+  const seen = (+localStorage.getItem('menu_tut_count') || 0) + 1;
+  localStorage.setItem('menu_tut_count', seen);
+  if (seen % 2 === 1) openTutorial();
 }
 
 async function logout() {
@@ -277,12 +280,12 @@ function freeSlot(r) {
     || ALL_SLOTS.find((s) => !used.has(s) && r.meals.includes(NEED[kindOf(s)]));
 }
 
-// Кнопка «В моё меню»: всегда одна и та же раскладка, поэтому ничего не двигается
+// Кнопка «В рацион»: всегда одна и та же раскладка, поэтому ничего не двигается
 function addBtn(r) {
   const cnt = S.my.filter((e) => e.rid === r.id).length;
   const can = !!freeSlot(r);
-  const label = cnt ? `${L('В меню', 'In menu')} ${cnt} · ${S.my.length} ${L('из', 'of')} ${MAX}`
-    : can ? L('В моё меню', 'Add to my menu') : L('Нет свободных слотов', 'No free slots');
+  const label = cnt ? `${L('Добавлено', 'Added')} ${cnt} · ${S.my.length} ${L('из', 'of')} ${MAX}`
+    : can ? L('Добавить', 'Add') : L('Нет свободных слотов', 'No free slots');
   return `<div class="addwrap" data-rid="${r.id}">
     <button class="btn" data-less="${r.id}" ${cnt ? '' : 'disabled'} aria-label="${L('Убрать одно', 'Remove one')}">−</button>
     <button class="cnt" data-more="${r.id}" ${can ? '' : 'disabled'}>${label}</button>
@@ -335,10 +338,11 @@ function openRecipe(id) {
 const slotName = (s) => (s[0] === 'x' ? `${L('Десерт', 'Dessert')} ${+s[1] + 1}` : s[0] === 's' ? `${L('Салат', 'Salad')} ${+s[1] + 1}`
   : `${DAYS()[+s[0]]} · ${kindLabel(s[1])}`);
 
-function slotTable(list) {
+function slotTable(list, interactive = false) {
   const at = {};
   valid(list).forEach((e) => { at[e.slot] = e; });
-  const cell = (s) => { const e = at[s]; return `<td><button class="slotbtn ${e ? 'on' : ''}" data-slot="${s}" title="${slotName(s)}">${
+  const cell = (s) => { const e = at[s]; const drag = interactive && e ? ' draggable="true"' : '';
+    return `<td><button class="slotbtn ${e ? 'on' : ''}" data-slot="${s}"${drag} title="${slotName(s)}">${
     e ? `<span class="t">${esc(recTitle(recipe(e.rid)))}</span>` : '<span class="plus">+</span>'}</button></td>`; };
   const kc = (f) => sumKcal(list.filter(f)) || '';
   const extra = (k, label) => `<tr class="dess"><th>${label}</th>${[0, 1, 2].map((n) => cell(`${k}${n}`)).join('')}<td></td>
@@ -379,12 +383,41 @@ function setSlot(slot, rid) {
   if (rid) S.my.push({ rid, slot });
 }
 
+// Перетаскивание блюд в «Рационе»: тянем одно блюдо на другой слот — они меняются местами
+document.addEventListener('dragstart', (e) => {
+  const b = e.target.closest('.slotbtn[draggable="true"]');
+  if (!b) return;
+  e.dataTransfer.setData('text/plain', b.dataset.slot);
+  e.dataTransfer.effectAllowed = 'move';
+  b.classList.add('dragging');
+});
+document.addEventListener('dragend', (e) => { const b = e.target.closest('.slotbtn'); if (b) b.classList.remove('dragging'); });
+document.addEventListener('dragover', (e) => { if (e.target.closest('.slots')) e.preventDefault(); });
+document.addEventListener('drop', (e) => {
+  const target = e.target.closest('.slotbtn');
+  if (!target) return;
+  e.preventDefault();
+  const from = e.dataTransfer.getData('text/plain'), to = target.dataset.slot;
+  if (!from || from === to) return;
+  const a = S.my.find((x) => x.slot === from), b = S.my.find((x) => x.slot === to);
+  if (!a) return;
+  const ra = recipe(a.rid);
+  if (!ra || !ra.meals.includes(NEED[kindOf(to)])) return; // блюдо не подходит разделу этого слота
+  if (b) {
+    const rb = recipe(b.rid);
+    if (!rb || !rb.meals.includes(NEED[kindOf(from)])) return; // и второе блюдо туда обратно не встанет
+  }
+  a.slot = to;
+  if (b) b.slot = from;
+  render();
+});
+
 /* ---------- Имена людей в комнате и скидки ---------- */
 function fillNames() {
   $('#dlg').className = '';
   $('#dlg').innerHTML = `
     <h2>${L('Имена в комнате', 'Names in the room')}</h2>
-    <p class="meta">${L('Они появятся в «Моём меню» кнопками для быстрого выбора. Скидки настраиваются в «Базе продуктов».',
+    <p class="meta">${L('Они появятся в «Рационе» кнопками для быстрого выбора. Скидки настраиваются в «Базе продуктов».',
       'They appear in "My menu" as quick-pick buttons. Discounts are set in the "Product database" page.')}</p>
     <div class="slot-top" style="margin-top:12px"><input id="n-new" placeholder="${L('Новое имя', 'New name')}" maxlength="20" autocomplete="off">
       <button class="btn primary" data-addname>${L('Добавить', 'Add')}</button></div>
@@ -406,17 +439,18 @@ async function addName() {
   fillNames(); render();
 }
 
-/* ---------- Моё меню ---------- */
+/* ---------- Рацион ---------- */
 function viewMy() {
   const list = valid(S.my);
   $('#view').innerHTML = `<section class="page page-wide">
-    <h2>${L('Моё меню на неделю', 'My menu for the week')}</h2>
+    <h2>${L('Рацион на неделю', 'My menu for the week')}</h2>
     <p class="meta">${L('Нажмите на слот и выберите блюдо. Заполнять все слоты не нужно.', 'Click a slot and pick a dish. You don\'t need to fill every slot.')}</p>
     <div class="field" style="margin-top:16px"><label>${L('Кто вы', 'Who are you')}</label>
       <div class="people">${S.people.map((p) => `<button class="chip big ${S.name === p.name ? 'on' : ''}" data-person="${esc(p.name)}">${esc(p.name)}</button>`).join('')}
       <button class="chip big add" data-names>${S.people.length ? `+ ${L('Имя', 'Name')}` : L('+ Добавить своё имя', '+ Add your name')}</button></div></div>
     <p class="sum">${summary(list)}</p>
-    ${slotTable(list)}
+    ${slotTable(list, true)}
+    <p class="meta" style="margin-top:4px">${L('Блюда в рационе можно перетаскивать мышью, чтобы поменять местами.', 'Drag dishes to swap their places.')}</p>
     ${costLines(list, discOf(S.name))}
     <div class="bar">
       <button class="btn primary" data-send ${list.length ? '' : 'disabled'}>${L('Отправить в меню недели', 'Send to weekly menu')}</button>
@@ -458,7 +492,7 @@ function viewWeek() {
           <div class="foot"><button class="btn" data-edit="${esc(w.person)}">${L('Редактировать', 'Edit')}</button>
           <button class="btn" data-del="${esc(w.person)}">${L('Удалить', 'Delete')}</button></div></article>`).join('')}</div>
       <section class="final"><h3>${L('Всего порций на неделю', 'Total servings for the week')}: ${all.length}</h3>${tallyList(tally(all), true)}${finalCostLines(S.wishes)}</section>`
-      : `<p class="empty">${L('Пока никто не отправил меню. Заполните «Моё меню» и нажмите «Отправить в меню недели».',
+      : `<p class="empty">${L('Пока никто не отправил меню. Заполните «Рацион» и нажмите «Отправить в меню недели».',
           'No one has sent a menu yet. Fill in "My menu" and click "Send to weekly menu".')}</p>`}
   </section>`;
 }
@@ -532,9 +566,9 @@ function viewBase() {
         <input id="sup-in" type="number" min="0" step="any" value="${S.settings.supplies}"></div>
       <div class="field"><label>${L('Оплата за приготовление по сложности', 'Preparation pay by difficulty')}</label>
         <div class="cookk">
-          <label>${stars(1)}<input id="cook1-in" type="number" min="0" max="5" step="0.1" value="${S.settings.cook_k1 ?? 0.7}"></label>
-          <label>${stars(2)}<input id="cook2-in" type="number" min="0" max="5" step="0.1" value="${S.settings.cook_k2 ?? 1}"></label>
-          <label>${stars(3)}<input id="cook3-in" type="number" min="0" max="5" step="0.1" value="${S.settings.cook_k3 ?? 1.5}"></label>
+          <label>${stars(1)}<input id="cook1-in" type="number" min="0" step="0.25" value="${S.settings.cook_k1 ?? 0.7}"></label>
+          <label>${stars(2)}<input id="cook2-in" type="number" min="0" step="0.25" value="${S.settings.cook_k2 ?? 1}"></label>
+          <label>${stars(3)}<input id="cook3-in" type="number" min="0" step="0.25" value="${S.settings.cook_k3 ?? 1.5}"></label>
         </div></div>
     </div>
     <h3 style="margin-top:16px">${L('Скидки', 'Discounts')}</h3>
@@ -543,7 +577,7 @@ function viewBase() {
         <select class="disc-sel" data-disc="${esc(p.name)}">
           ${DISCOUNTS.map((v) => `<option value="${v}" ${p.discount === v ? 'selected' : ''}>${v}%</option>`).join('')}
         </select></div>`).join('')}</div>`
-      : `<p class="meta">${L('Пока нет имён. Добавьте их на странице «Моё меню».', 'No names yet. Add them on the "My menu" page.')}</p>`}
+      : `<p class="meta">${L('Пока нет имён. Добавьте их на странице «Рацион».', 'No names yet. Add them on the "My menu" page.')}</p>`}
     <h3 style="margin-top:16px">${L('Новый продукт', 'New product')}</h3>
     <div class="newing">
       <input id="ni-name" type="text" placeholder="${L('Название', 'Name')}" autocomplete="off">
@@ -665,6 +699,8 @@ function openForm(id) {
   const r = id ? recipe(id) : null;
   S.editId = id || null;
   S.formPhoto = r ? r.photo || '' : '';
+  S.formPhotoBlob = null;
+  S.photoChanged = false;
   const has = (arr, v) => r && (r[arr] || []).includes(v) ? 'checked' : '';
   $('#dlg').className = 'form';
   $('#dlg').innerHTML = `<div class="dlg-body">
@@ -719,9 +755,19 @@ async function saveRecipe() {
   }
   if (!items.length) return alert(L('Добавьте хотя бы один ингредиент с количеством.', 'Add at least one ingredient with an amount.'));
 
+  const before = S.editId ? recipe(S.editId) : null;
+  let photo = before ? before.photo || '' : '';
+  if (S.photoChanged) {
+    photo = '';
+    if (S.formPhotoBlob) {
+      try { photo = (await db.uploadPhoto(S.formPhotoBlob)) || S.formPhoto; } // не вышло загрузить в облако — сохраняем как раньше, прямо в базе
+      catch (e) { photo = S.formPhoto; }
+    }
+    if (before && before.photo && before.photo !== photo) db.removeStoredPhoto(before.photo);
+  }
   const data = {
     title, meals, tags: checked('tag'), difficulty: +(document.querySelector('[name=diff]:checked') || {}).value || 2,
-    servings: S.editId ? sv(recipe(S.editId)) : 1, items, photo: S.formPhoto || '', steps: $('#f-steps').value.trim(),
+    servings: before ? sv(before) : 1, items, photo, steps: $('#f-steps').value.trim(),
   };
   if (S.editId) await db.updateRecipe(S.editId, data); else await db.addRecipe(data);
   S.recipes = await db.getRecipes();
@@ -731,7 +777,7 @@ async function saveRecipe() {
   render();
 }
 
-function readPhoto(file) { // уменьшаем до 900 px, чтобы фото занимало немного места
+function readPhoto(file) { // уменьшаем до 900 px и сразу готовим и превью, и файл для загрузки в облако
   return new Promise((resolve) => {
     const fr = new FileReader(), img = new Image();
     fr.onload = () => { img.src = fr.result; };
@@ -740,7 +786,8 @@ function readPhoto(file) { // уменьшаем до 900 px, чтобы фот�
       const c = document.createElement('canvas');
       c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      resolve(c.toDataURL('image/jpeg', 0.8));
+      const dataUrl = c.toDataURL('image/jpeg', 0.8);
+      c.toBlob((blob) => resolve({ dataUrl, blob }), 'image/jpeg', 0.8);
     };
     fr.readAsDataURL(file);
   });
@@ -759,6 +806,7 @@ document.addEventListener('click', async (e) => {
   if (get('[data-theme-toggle]') || t.id === 'theme-toggle' || t.closest('#theme-toggle')) {
     applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); return;
   }
+  if (get('[data-tut-close]') || t.id === 'tutorial') { closeTutorial(); return; }
   if (t.id === 'lang-toggle' || t.closest('#lang-toggle')) {
     S.lang = S.lang === 'en' ? 'ru' : 'en';
     localStorage.setItem('menu_lang', S.lang);
@@ -826,8 +874,8 @@ document.addEventListener('click', async (e) => {
     fillNames(); render(); return;
   }
   if (get('[data-person]')) { S.name = get('[data-person]').dataset.person; render(); return; }
-  if (get('[data-clearmy]')) { if (confirm(L('Очистить всё моё меню?', 'Clear all of my menu?'))) { S.my = []; render(); } return; }
-  if (get('[data-rmphoto]')) { S.formPhoto = ''; $('#f-prev').innerHTML = `<span>${L('Нет фото', 'No photo')}</span>`; return; }
+  if (get('[data-clearmy]')) { if (confirm(L('Очистить весь рацион?', 'Clear all of my menu?'))) { S.my = []; render(); } return; }
+  if (get('[data-rmphoto]')) { S.formPhoto = ''; S.formPhotoBlob = null; S.photoChanged = true; $('#f-prev').innerHTML = `<span>${L('Нет фото', 'No photo')}</span>`; return; }
   if (get('[data-editrec]')) {
     const id = get('[data-editrec]').dataset.editrec;
     if ($('#dlg').open) $('#dlg').close();
@@ -836,6 +884,7 @@ document.addEventListener('click', async (e) => {
   if (get('[data-delrec]')) {
     const id = get('[data-delrec]').dataset.delrec;
     if (confirm(L(`Удалить рецепт «${recipe(id).title}»?`, `Delete recipe "${recipe(id).title}"?`))) {
+      db.removeStoredPhoto(recipe(id).photo);
       await db.deleteRecipe(id);
       S.recipes = S.recipes.filter((r) => r.id !== id);
       S.my = S.my.filter((x) => x.rid !== id);
@@ -934,7 +983,7 @@ document.addEventListener('change', async (e) => {
   }
   if (['cook1-in', 'cook2-in', 'cook3-in'].includes(t.id)) { // своя оплата приготовления на каждый уровень сложности, шаг 0,25
     const key = 'cook_k' + t.id[4];
-    S.settings[key] = Math.max(0, Number((Math.round((+t.value || 0) / 0.1) * 0.1).toFixed(1)));
+    S.settings[key] = Math.max(0, Math.round((+t.value || 0) / 0.25) * 0.25);
     t.value = S.settings[key];
     await db.saveSettings(S.settings);
   }
@@ -951,9 +1000,10 @@ document.addEventListener('change', async (e) => {
     persist();
     viewBase();
   }
-  if (t.id === 'f-photo' && t.files[0]) { // фото: уменьшаем и храним вместе с рецептом
-    S.formPhoto = await readPhoto(t.files[0]);
-    $('#f-prev').innerHTML = `<img src="${S.formPhoto}" alt="">`;
+  if (t.id === 'f-photo' && t.files[0]) { // фото: уменьшаем, показываем превью, грузим в облако при сохранении
+    const { dataUrl, blob } = await readPhoto(t.files[0]);
+    S.formPhoto = dataUrl; S.formPhotoBlob = blob; S.photoChanged = true;
+    $('#f-prev').innerHTML = `<img src="${dataUrl}" alt="">`;
   }
   if (t.classList.contains('name')) { // известный продукт: единица подставляется сама; новый: просим категорию и калории
     const row = t.closest('.ing-row');
@@ -980,8 +1030,9 @@ document.addEventListener('input', (e) => {
 
 // Колёсико мыши в числовых полях: шаг 50 (цены, граммы), 0,25 для коэффициента повара, 1 для порций и штучных продуктов
 const stepFor = (t) => {
-  if (['cook1-in', 'cook2-in', 'cook3-in'].includes(t.id)) return Number((0.1).toFixed(1));
-t.value = Number(Math.min(max, Math.max(min, (parseFloat(t.value) || 0) + (e.deltaY < 0 ? 1 : -1) * step)).toFixed(1));  const id = t.dataset.price || t.dataset.bprice || t.dataset.bkcal;
+  if (['cook1-in', 'cook2-in', 'cook3-in'].includes(t.id)) return 0.25;
+  if (t.classList.contains('amt')) { const row = t.closest('.ing-row'); return row && row.querySelector('.u').textContent === 'шт' ? 1 : 50; }
+  const id = t.dataset.price || t.dataset.bprice || t.dataset.bkcal;
   const ing = id && ingById(id);
   return ing && ing.unit === 'шт' ? 1 : 50;
 };
@@ -991,7 +1042,7 @@ document.addEventListener('wheel', (e) => {
   e.preventDefault();
   const step = stepFor(t), min = t.min === '' ? -Infinity : +t.min, max = t.max === '' ? Infinity : +t.max;
   t.value = Math.min(max, Math.max(min, (parseFloat(t.value) || 0) + (e.deltaY < 0 ? 1 : -1) * step));
- t.value = +(Math.min(max, Math.max(min, (parseFloat(t.value) || 0) + (e.deltaY < 0 ? 1 : -1) * step))).toFixed(1);
+  t.dispatchEvent(new Event('input', { bubbles: true }));
   clearTimeout(t._wt);
   t._wt = setTimeout(() => t.dispatchEvent(new Event('change', { bubbles: true })), 500); // сохраняем, когда крутить перестали
 }, { passive: false });
@@ -1001,6 +1052,28 @@ document.addEventListener('keydown', (e) => {
   if (['a-login', 'a-pass', 'a-pass2'].includes(e.target.id)) authGo();
   if (e.target.id === 'n-new') addName();
 });
+
+/* ---------- Туториал: как пользоваться ---------- */
+function tutorialHtml() {
+  const step = (n, title, text) => `<div class="tut-step"><span class="tut-circle">${n}</span>
+    <h3>${esc(title)}</h3><p>${esc(text)}</p></div>`;
+  return `<div class="tut-card">
+    <button class="x tut-close" data-tut-close aria-label="${L('Закрыть', 'Close')}">×</button>
+    <h2>${L('Как пользоваться', 'How it works')}</h2>
+    <div class="tut-gif"><img src="tutorial.gif" alt="" onerror="this.closest('.tut-gif').classList.add('empty')"></div>
+    <div class="tut-steps">
+      ${step(1, L('Выбирайте блюда', 'Pick dishes'),
+        L('На странице «Блюда» нажимайте «+ Добавить» — блюдо само встанет в свободный слот.', 'On the "Dishes" page, press "+ Add" — the dish fills a free slot by itself.'))}
+      ${step(2, L('Переставляйте в «Рационе»', 'Rearrange in "Diet"'),
+        L('Не понравилось место? Перетащите блюдо мышью на другой слот — они поменяются местами.', 'Don\'t like the spot? Drag a dish onto another slot — they swap places.'))}
+      ${step(3, L('Отправьте — и готово', 'Send it — done'),
+        L('Нажмите «Отправить в меню недели»: список покупок и стоимость посчитаются сами.', 'Press "Send to weekly menu": the shopping list and cost are calculated automatically.'))}
+    </div>
+    <button class="btn primary" data-tut-close>${L('Понятно, начнём', 'Got it, let\'s start')}</button>
+  </div>`;
+}
+function openTutorial() { $('#tutorial').innerHTML = tutorialHtml(); $('#tutorial').hidden = false; }
+function closeTutorial() { $('#tutorial').hidden = true; }
 
 /* ---------- Старт ---------- */
 initChrome();

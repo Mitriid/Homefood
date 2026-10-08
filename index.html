@@ -9,7 +9,8 @@
     try { document.documentElement.setAttribute('data-theme', localStorage.getItem('menu_theme') || 'light'); } catch (e) {}
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@200..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -27,6 +28,7 @@
   <main id="view"></main>
 
   <dialog id="dlg"></dialog>
+  <div id="tutorial" class="tut-overlay" hidden></div>
   <datalist id="ing-list"></datalist>
 
   <script type="module" src="app.js"></script>

@@ -310,11 +310,12 @@ function renderGrid() {
     </article>`).join('') : `<p class="empty">${L('Ничего не найдено. Измените фильтры или добавьте рецепт.', 'Nothing found. Change the filters or add a recipe.')}</p>`;
 }
 
-function openRecipe(id) {
+async function openRecipe(id) {
   $('#dlg').className = '';
   const r = recipe(id);
+  const photoToken = (S._photoToken = (S._photoToken || 0) + 1); // чтобы не подставить фото в уже закрытое окно
   $('#dlg').innerHTML = `
-    <div class="photo">${r.photo ? `<img src="${r.photo}" alt="">` : `<span>${L('Фото можно добавить через ✎', 'Add a photo via ✎')}</span>`}</div>
+    <div class="photo" id="r-photo"><span>${L('Загрузка…', 'Loading…')}</span></div>
     <h2>${esc(recTitle(r))}</h2>
     <p class="meta">${r.meals.map(mealLabel).join(', ')} · ${stars(r.difficulty)} · ${L('на 1 порцию', 'per serving')} ${kcalOf(r)} ${L('ккал', 'kcal')}</p>
     <p class="price">${L('Стоимость порции', 'Portion cost')}: <b>${money(dishFood(r) + dishWork(r))}</b></p>
@@ -332,6 +333,11 @@ function openRecipe(id) {
       <button class="btn" data-close>${L('Закрыть', 'Close')}</button>
     </div>`;
   $('#dlg').showModal();
+  db.getPhoto(id).then((photo) => { // фото подтягиваем отдельно — страница со списком блюд его не ждёт
+    if (S._photoToken !== photoToken) return; // окно уже закрыли/сменили, этот ответ больше не актуален
+    const box = document.getElementById('r-photo');
+    if (box) box.innerHTML = photo ? `<img src="${photo}" alt="">` : `<span>${L('Фото можно добавить через ✎', 'Add a photo via ✎')}</span>`;
+  });
 }
 
 /* ---------- Слоты недели ---------- */
@@ -698,9 +704,10 @@ function formKcal() {
 function openForm(id) {
   const r = id ? recipe(id) : null;
   S.editId = id || null;
-  S.formPhoto = r ? r.photo || '' : '';
+  S.formPhoto = ''; S.formPhotoOriginal = ''; // настоящее фото подтянется отдельно — см. ниже
   S.formPhotoBlob = null;
   S.photoChanged = false;
+  const photoToken = (S._photoToken = (S._photoToken || 0) + 1);
   const has = (arr, v) => r && (r[arr] || []).includes(v) ? 'checked' : '';
   $('#dlg').className = 'form';
   $('#dlg').innerHTML = `<div class="dlg-body">
@@ -715,7 +722,7 @@ function openForm(id) {
         <div class="checks">${[1, 2, 3].map((n) => `<label><input type="radio" name="diff" value="${n}" ${(r ? r.difficulty || 2 : 2) === n ? 'checked' : ''}> ${stars(n)}</label>`).join('')}</div></div>
     </div>
     <div class="field"><label>${L('Фото', 'Photo')}</label>
-      <div class="photo sm" id="f-prev">${S.formPhoto ? `<img src="${S.formPhoto}" alt="">` : `<span>${L('Нет фото', 'No photo')}</span>`}</div>
+      <div class="photo sm" id="f-prev"><span>${r ? L('Загрузка…', 'Loading…') : L('Нет фото', 'No photo')}</span></div>
       <div class="bar" style="margin-top:8px"><label class="btn">${L('Выбрать файл', 'Choose file')}<input id="f-photo" type="file" accept="image/*" hidden></label>
         <button class="btn" type="button" data-rmphoto>${L('Убрать фото', 'Remove photo')}</button></div></div>
     <div class="field"><label>${L('Ингредиенты', 'Ingredients')}</label>
@@ -730,6 +737,14 @@ function openForm(id) {
       <button class="btn" data-close>${L('Отмена', 'Cancel')}</button><button class="btn primary" id="save-recipe">${L('Сохранить', 'Save')}</button></div>`;
   $('#dlg').showModal();
   formKcal();
+  if (r) {
+    db.getPhoto(id).then((photo) => {
+      if (S._photoToken !== photoToken) return; // форму уже закрыли или открыли другую
+      S.formPhoto = photo; S.formPhotoOriginal = photo;
+      const prev = $('#f-prev');
+      if (prev) prev.innerHTML = photo ? `<img src="${photo}" alt="">` : `<span>${L('Нет фото', 'No photo')}</span>`;
+    });
+  }
 }
 
 async function saveRecipe() {
@@ -756,14 +771,14 @@ async function saveRecipe() {
   if (!items.length) return alert(L('Добавьте хотя бы один ингредиент с количеством.', 'Add at least one ingredient with an amount.'));
 
   const before = S.editId ? recipe(S.editId) : null;
-  let photo = before ? before.photo || '' : '';
+  let photo = S.formPhotoOriginal || ''; // настоящее фото, подтянутое отдельно при открытии формы (см. openForm)
   if (S.photoChanged) {
     photo = '';
     if (S.formPhotoBlob) {
       try { photo = (await db.uploadPhoto(S.formPhotoBlob)) || S.formPhoto; } // не вышло загрузить в облако — сохраняем как раньше, прямо в базе
       catch (e) { photo = S.formPhoto; }
     }
-    if (before && before.photo && before.photo !== photo) db.removeStoredPhoto(before.photo);
+    if (S.formPhotoOriginal && S.formPhotoOriginal !== photo) db.removeStoredPhoto(S.formPhotoOriginal);
   }
   const data = {
     title, meals, tags: checked('tag'), difficulty: +(document.querySelector('[name=diff]:checked') || {}).value || 2,
@@ -884,7 +899,7 @@ document.addEventListener('click', async (e) => {
   if (get('[data-delrec]')) {
     const id = get('[data-delrec]').dataset.delrec;
     if (confirm(L(`Удалить рецепт «${recipe(id).title}»?`, `Delete recipe "${recipe(id).title}"?`))) {
-      db.removeStoredPhoto(recipe(id).photo);
+      db.getPhoto(id).then((photo) => db.removeStoredPhoto(photo)); // подтягиваем фото отдельно, в списке блюд его нет
       await db.deleteRecipe(id);
       S.recipes = S.recipes.filter((r) => r.id !== id);
       S.my = S.my.filter((x) => x.rid !== id);

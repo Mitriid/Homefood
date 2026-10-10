@@ -174,12 +174,42 @@ export async function getIngredients() {
   return load().ingredients;
 }
 
+// Фото НЕ запрашиваем здесь — список блюд должен грузиться быстро, даже если фото много.
+// Фото подтягивается отдельно, только когда реально нужно показать конкретное блюдо (см. getPhoto).
 export async function getRecipes() {
   if (useSb()) {
-    const { data } = await sb.from('recipes').select('*, items:recipe_ingredients(ingredient_id, amount)').order('title');
+    const { data } = await sb.from('recipes')
+      .select('id, title, meals, tags, difficulty, servings, steps, items:recipe_ingredients(ingredient_id, amount)')
+      .order('title');
     return data;
   }
   return load().recipes;
+}
+
+export async function getPhoto(id) {
+  if (useSb()) {
+    const { data } = await sb.from('recipes').select('photo').eq('id', id).maybeSingle();
+    return data ? data.photo || '' : '';
+  }
+  const r = load().recipes.find((x) => x.id === id);
+  return r ? r.photo || '' : '';
+}
+
+// Фото хранится в Supabase Storage (бакет photos), ссылка просто текст в recipes.photo.
+// В локальном/демо-режиме облака нет — фото остаётся как есть (data:... строка), ничего не грузим.
+export async function uploadPhoto(blob) {
+  if (!useSb()) return null;
+  const path = `${ROOM}/${uid()}.jpg`;
+  const { error } = await sb.storage.from('photos').upload(path, blob, { contentType: 'image/jpeg' });
+  if (error) throw error;
+  return sb.storage.from('photos').getPublicUrl(path).data.publicUrl;
+}
+
+export async function removeStoredPhoto(url) {
+  if (!useSb() || !url) return;
+  const m = url.match(/\/storage\/v1\/object\/public\/photos\/(.+)$/);
+  if (!m) return;
+  try { await sb.storage.from('photos').remove([m[1]]); } catch (e) { /* не страшно, просто останется неиспользуемый файл */ }
 }
 
 export async function addIngredient({ name, unit, category = 'Другое', kcal = 0, price = null, staple = false }) {

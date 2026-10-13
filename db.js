@@ -99,9 +99,11 @@ const ingRow = ([name, unit, category, kcal, price, staple]) => ({ name, unit, c
 
 async function seedRoom() {
   if (useSb()) {
+    // На этом устройстве уже заходили в эту комнату — она точно не пустая, лишний раз не проверяем
+    if (localStorage.getItem(`menu_seeded_${ROOM}`)) return;
     await sb.from('settings').upsert({ room_id: ROOM }, { onConflict: 'room_id', ignoreDuplicates: true });
     const { count } = await sb.from('recipes').select('*', { count: 'exact', head: true });
-    if (count) return;
+    if (count) { localStorage.setItem(`menu_seeded_${ROOM}`, '1'); return; }
     const { data: ings, error } = await sb.from('ingredients')
       .upsert(SEED_INGREDIENTS.map((a) => ({ ...ingRow(a), room_id: ROOM })), { onConflict: 'room_id,name' }).select();
     if (error) throw error;
@@ -113,6 +115,7 @@ async function seedRoom() {
       if (e2) throw e2;
       await sb.from('recipe_ingredients').insert(r.ing.map(([n, amount]) => ({ recipe_id: rec.id, ingredient_id: id[n], amount })));
     }
+    localStorage.setItem(`menu_seeded_${ROOM}`, '1');
     return;
   }
   if (load()) return;
